@@ -1,8 +1,8 @@
 # Default Configuration for Hallucination Detection Pipeline
 
 model:
-  # Suggested: Qwen/Qwen2.5-1.5B-Instruct or Qwen/Qwen2.5-3B-Instruct or meta-llama/Llama-3.2-3B-Instruct
-  name: "Qwen/Qwen2.5-1.5B-Instruct"
+  # Local project path or HuggingFace ID
+  name: "models/Qwen2.5-1.5B-Instruct"
   device: "auto"          # "auto", "cuda", "cpu"
   torch_dtype: "float16"   # "float16", "bfloat16", "float32"
   load_in_4bit: false      # set to true if VRAM is constrained

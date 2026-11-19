@@ -277,8 +277,20 @@ def get_generator(
     gen_cfg = config.get("generation", {})
     feat_cfg = config.get("features", {})
 
+    target_name = model_cfg.get("name", "models/Qwen2.5-1.5B-Instruct")
+    # Auto-resolve local project directory if present
+    local_candidates = [
+        target_name,
+        os.path.join("models", os.path.basename(target_name)),
+        "models/Qwen2.5-1.5B-Instruct",
+    ]
+    for cand in local_candidates:
+        if cand and os.path.isdir(cand) and os.path.exists(os.path.join(cand, "config.json")):
+            target_name = os.path.abspath(cand)
+            break
+
     return HuggingFaceGenerator(
-        model_name=model_cfg.get("name", "Qwen/Qwen2.5-1.5B-Instruct"),
+        model_name=target_name,
         device=model_cfg.get("device", "auto"),
         torch_dtype=model_cfg.get("torch_dtype", "float16"),
         load_in_4bit=model_cfg.get("load_in_4bit", False),
