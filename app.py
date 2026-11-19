@@ -123,7 +123,7 @@ with tabs[0]:
 
     mode = st.radio(
         "Inference Mode:",
-        ["Curated Benchmark Examples", "Random Sample from Evaluation Sets"],
+        ["Curated Benchmark Examples", "Random Sample from Evaluation Sets", "⚡ Live Custom Question (Local Qwen GPU)"],
         horizontal=True
     )
 
@@ -217,6 +217,58 @@ with tabs[0]:
                 "risk": sim_risk,
             }
 
+    elif mode == "⚡ Live Custom Question (Local Qwen GPU)":
+        custom_q = st.text_input("Enter any question to test Qwen live:", "What is the capital of Australia?")
+        col_btn, _ = st.columns([1, 3])
+        with col_btn:
+            run_btn = st.button("🚀 Run Live Generation on GPU")
+
+        if run_btn and custom_q.strip():
+            with st.spinner("Generating answer & extracting neural uncertainty traces on RTX 4060..."):
+                try:
+                    from halludetect.config import load_config
+                    from halludetect.generate import get_generator
+                    from halludetect.features.grey import extract_graybox_features
+                    from halludetect.features.consistency import extract_blackbox_features
+
+                    @st.cache_resource
+                    def get_live_generator():
+                        cfg = load_config("configs/default.yaml")
+                        return get_generator(config=cfg, mock=False)
+
+                    gen = get_live_generator()
+                    res = gen.generate(
+                        question_id="live_demo",
+                        question=custom_q,
+                        max_new_tokens=32,
+                        num_samples=3,
+                        temperature=0.7,
+                    )
+
+                    gray = extract_graybox_features(res.token_logprobs, res.token_entropies)
+                    black = extract_blackbox_features(res.greedy_text, res.sampled_answers)
+
+                    base_risk = 0.50 - (gray["mean_logprob"] * 0.15) - (black["agreement_rate"] * 0.28) + (gray["mean_entropy"] * 0.12)
+                    cal_risk = float(np.clip(base_risk, 0.03, 0.97))
+
+                    selected_row = {
+                        "dataset": "Live User Query",
+                        "question": custom_q,
+                        "greedy_text": res.greedy_text,
+                        "label": -1,
+                        "mean_logprob": gray["mean_logprob"],
+                        "min_logprob": gray["min_logprob"],
+                        "first_token_logprob": gray["first_token_logprob"],
+                        "mean_entropy": gray["mean_entropy"],
+                        "agreement_rate": black["agreement_rate"],
+                        "semantic_entropy": black["semantic_entropy"],
+                        "num_semantic_clusters": black["num_semantic_clusters"],
+                        "risk": cal_risk,
+                        "samples": res.sampled_answers,
+                    }
+                except Exception as e:
+                    st.error(f"Error during live GPU generation: {e}")
+
     if selected_row:
         st.markdown("---")
         col_q, col_gauge = st.columns([1.6, 1.0])
@@ -229,8 +281,15 @@ with tabs[0]:
             ground_truth_label = selected_row["label"]
             if ground_truth_label == 0:
                 st.markdown("<span class='badge-pass'>✓ Ground Truth: Factually Correct</span>", unsafe_allow_html=True)
-            else:
+            elif ground_truth_label == 1:
                 st.markdown("<span class='badge-fail'>✗ Ground Truth: Hallucination / Factually False</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span class='badge-pass' style='background-color: #e0f2fe; color: #0369a1;'>🔍 Live Prediction (Evaluated via internal vital signs alone)</span>", unsafe_allow_html=True)
+
+            if "samples" in selected_row and selected_row["samples"]:
+                with st.expander("🔬 View Stochastic Alternate Samples (N=3)"):
+                    for s_i, s_txt in enumerate(selected_row["samples"], 1):
+                        st.markdown(f"**Sample {s_i}:** *\"{s_txt}\"*")
 
         with col_gauge:
             risk_pct = int(np.round(selected_row["risk"] * 100))
