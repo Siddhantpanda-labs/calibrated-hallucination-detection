@@ -59,10 +59,31 @@ st.markdown("""
 
 @st.cache_data
 def load_datasets():
-    t_path = "data/processed/features_triviaqa.parquet"
-    o_path = "data/processed/features_truthfulqa.parquet"
-    df_t = pd.read_parquet(t_path) if os.path.exists(t_path) else None
-    df_o = pd.read_parquet(o_path) if os.path.exists(o_path) else None
+    t_feat = "data/processed/features_triviaqa.parquet"
+    t_gen = "data/processed/generations_triviaqa.parquet"
+    o_feat = "data/processed/features_truthfulqa.parquet"
+    o_gen = "data/processed/generations_truthfulqa.parquet"
+
+    df_t = pd.read_parquet(t_feat) if os.path.exists(t_feat) else None
+    if df_t is not None and os.path.exists(t_gen):
+        try:
+            df_tg = pd.read_parquet(t_gen)
+            cols_to_add = [c for c in ["sampled_answers", "gold_answers"] if c in df_tg.columns and c not in df_t.columns]
+            if cols_to_add:
+                df_t = df_t.merge(df_tg[["question_id"] + cols_to_add], on="question_id", how="left")
+        except Exception:
+            pass
+
+    df_o = pd.read_parquet(o_feat) if os.path.exists(o_feat) else None
+    if df_o is not None and os.path.exists(o_gen):
+        try:
+            df_og = pd.read_parquet(o_gen)
+            cols_to_add = [c for c in ["sampled_answers", "gold_answers"] if c in df_og.columns and c not in df_o.columns]
+            if cols_to_add:
+                df_o = df_o.merge(df_og[["question_id"] + cols_to_add], on="question_id", how="left")
+        except Exception:
+            pass
+
     return df_t, df_o
 
 
@@ -207,6 +228,8 @@ with tabs[0]:
                 "question": row["question"],
                 "greedy_text": row["greedy_text"],
                 "label": row.get("label", 0),
+                "gold_answers": list(row.get("gold_answers", [])) if hasattr(row.get("gold_answers", []), "__iter__") else [],
+                "samples": list(row.get("sampled_answers", [])) if hasattr(row.get("sampled_answers", []), "__iter__") else [],
                 "mean_logprob": float(row.get("mean_logprob", -1.0)),
                 "min_logprob": float(row.get("min_logprob", -3.0)),
                 "first_token_logprob": float(row.get("first_token_logprob", -1.0)),
@@ -219,8 +242,12 @@ with tabs[0]:
 
     elif mode == "⚡ Live Custom Question (Local Qwen GPU)":
         custom_q = st.text_input("Enter any question to test Qwen live:", "What is the capital of Australia?")
-        col_btn, _ = st.columns([1, 3])
+        col_t, col_btn = st.columns([2, 1])
+        with col_t:
+            max_tokens = st.slider("Max tokens to generate:", 16, 128, 48, 16, help="Allows the model to produce longer, fuller answers.")
         with col_btn:
+            st.write("")
+            st.write("")
             run_btn = st.button("🚀 Run Live Generation on GPU")
 
         if run_btn and custom_q.strip():
@@ -240,7 +267,7 @@ with tabs[0]:
                     res = gen.generate(
                         question_id="live_demo",
                         question=custom_q,
-                        max_new_tokens=32,
+                        max_new_tokens=max_tokens,
                         num_samples=3,
                         temperature=0.7,
                     )
@@ -275,19 +302,24 @@ with tabs[0]:
 
         with col_q:
             st.markdown(f"**Question:** `{selected_row['question']}`")
-            st.markdown(f"**Generated Answer (Qwen-2.5-1.5B):**")
+            st.markdown(f"**Full Generated Answer (Qwen-2.5-1.5B):**")
             st.info(f"💬 \"{selected_row['greedy_text']}\"")
 
-            ground_truth_label = selected_row["label"]
+            ground_truth_label = selected_row.get("label", -1)
             if ground_truth_label == 0:
                 st.markdown("<span class='badge-pass'>✓ Ground Truth: Factually Correct</span>", unsafe_allow_html=True)
             elif ground_truth_label == 1:
                 st.markdown("<span class='badge-fail'>✗ Ground Truth: Hallucination / Factually False</span>", unsafe_allow_html=True)
             else:
-                st.markdown("<span class='badge-pass' style='background-color: #e0f2fe; color: #0369a1;'>🔍 Live Prediction (Evaluated via internal vital signs alone)</span>", unsafe_allow_html=True)
+                st.markdown("<span class='badge-pass' style='background-color: #e0f2fe; color: #0369a1;'>🔍 Live User Query (Graded via internal vital signs alone!)</span>", unsafe_allow_html=True)
 
-            if "samples" in selected_row and selected_row["samples"]:
-                with st.expander("🔬 View Stochastic Alternate Samples (N=3)"):
+            if "gold_answers" in selected_row and len(selected_row["gold_answers"]) > 0:
+                with st.expander("📖 View Verified Ground Truth Answers (Answer Key)"):
+                    for g_ans in selected_row["gold_answers"]:
+                        st.markdown(f"- `{g_ans}`")
+
+            if "samples" in selected_row and selected_row["samples"] and len(selected_row["samples"]) > 0:
+                with st.expander(f"🔬 View All Stochastic Alternate Samples (N={len(selected_row['samples'])})"):
                     for s_i, s_txt in enumerate(selected_row["samples"], 1):
                         st.markdown(f"**Sample {s_i}:** *\"{s_txt}\"*")
 
